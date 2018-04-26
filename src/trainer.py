@@ -13,7 +13,7 @@ import torch
 from torch.autograd import Variable
 from torch.nn import functional as F
 
-from .utils import get_optimizer, export_embeddings
+from .utils import get_optimizer, load_embeddings, normalize_embeddings, export_embeddings
 from .utils import clip_parameters
 from .dico_builder import build_dictionary
 from .evaluation.word_translation import DIC_EVAL_PATH, load_identical_char_dico, load_dictionary
@@ -223,7 +223,7 @@ class Trainer(object):
             logger.info('* Best value for "%s": %.5f' % (metric, to_log[metric]))
             # save the mapping
             W = self.mapping.weight.data.cpu().numpy()
-            path = os.path.join(self.params.exp_path, 'best_mapping.t7')
+            path = os.path.join(self.params.exp_path, 'best_mapping.pth')
             logger.info('* Saving the mapping to %s ...' % path)
             torch.save(W, path)
 
@@ -231,7 +231,7 @@ class Trainer(object):
         """
         Reload the best mapping.
         """
-        path = os.path.join(self.params.exp_path, 'best_mapping.t7')
+        path = os.path.join(self.params.exp_path, 'best_mapping.pth')
         logger.info('* Reloading the best model from %s ...' % path)
         # reload the model
         assert os.path.isfile(path)
@@ -242,10 +242,25 @@ class Trainer(object):
 
     def export(self):
         """
-        Export embeddings to a text file.
+        Export embeddings.
         """
-        src_emb = self.mapping(self.src_emb.weight).data
-        tgt_emb = self.tgt_emb.weight.data
-        src_emb = src_emb / src_emb.norm(2, 1, keepdim=True).expand_as(src_emb)
-        tgt_emb = tgt_emb / tgt_emb.norm(2, 1, keepdim=True).expand_as(tgt_emb)
-        export_embeddings(src_emb.cpu().numpy(), tgt_emb.cpu().numpy(), self.params)
+        params = self.params
+
+        # load all embeddings
+        logger.info("Reloading all embeddings for mapping ...")
+        params.src_dico, src_emb = load_embeddings(params, source=True, full_vocab=True)
+        params.tgt_dico, tgt_emb = load_embeddings(params, source=False, full_vocab=True)
+
+        # apply same normalization as during training
+        normalize_embeddings(src_emb, params.normalize_embeddings, mean=params.src_mean)
+        normalize_embeddings(tgt_emb, params.normalize_embeddings, mean=params.tgt_mean)
+
+        # map source embeddings to the target space
+        bs = 4096
+        logger.info("Map source embeddings to the target space ...")
+        for i, k in enumerate(range(0, len(src_emb), bs)):
+            x = Variable(src_emb[k:k + bs], volatile=True)
+            src_emb[k:k + bs] = self.mapping(x.cuda() if params.cuda else x).data.cpu()
+
+        # write embeddings to the disk
+        export_embeddings(src_emb, tgt_emb, params)

@@ -6,6 +6,7 @@
 #
 
 import os
+import io
 from logging import getLogger
 import numpy as np
 import torch
@@ -13,7 +14,7 @@ import torch
 from ..utils import get_nn_avg_dist
 
 
-DIC_EVAL_PATH = 'data/crosslingual/dictionaries/'
+DIC_EVAL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'data', 'crosslingual', 'dictionaries')
 
 
 logger = getLogger()
@@ -52,7 +53,7 @@ def load_dictionary(path, word2id1, word2id2):
     not_found1 = 0
     not_found2 = 0
 
-    with open(path, 'r') as f:
+    with io.open(path, 'r', encoding='utf-8') as f:
         for _, line in enumerate(f):
             assert line == line.lower()
             word1, word2 = line.rstrip().split()
@@ -79,12 +80,15 @@ def load_dictionary(path, word2id1, word2id2):
     return dico
 
 
-def get_word_translation_accuracy(lang1, word2id1, emb1, lang2, word2id2, emb2, method):
+def get_word_translation_accuracy(lang1, word2id1, emb1, lang2, word2id2, emb2, method, dico_eval):
     """
     Given source and target word embeddings, and a dictionary,
     evaluate the translation accuracy using the precision@k.
     """
-    path = os.path.join(DIC_EVAL_PATH, '%s-%s.5000-6500.txt' % (lang1, lang2))
+    if dico_eval == 'default':
+        path = os.path.join(DIC_EVAL_PATH, '%s-%s.5000-6500.txt' % (lang1, lang2))
+    else:
+        path = dico_eval
     dico = load_dictionary(path, word2id1, word2id2)
     dico = dico.cuda() if emb1.is_cuda else dico
 
@@ -132,7 +136,7 @@ def get_word_translation_accuracy(lang1, word2id1, emb1, lang2, word2id2, emb2, 
         raise Exception('Unknown method: "%s"' % method)
 
     results = []
-    top_matches = scores.topk(100, 1, True)[1]
+    top_matches = scores.topk(10, 1, True)[1]
     for k in [1, 5, 10]:
         top_k_matches = top_matches[:, :k]
         _matching = (top_k_matches == dico[:, 1][:, None].expand_as(top_k_matches)).sum(1)

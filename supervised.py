@@ -17,25 +17,31 @@ from src.trainer import Trainer
 from src.evaluation import Evaluator
 
 
-VALIDATION_METRIC = 'mean_cosine-csls_knn_10-S2T-10000'
-
+# VALIDATION_METRIC = 'precision_at_1-nn'
+VALIDATION_METRIC = 'precision_at_1-csls_knn_10'
+# unsupervised criterion: 'mean_cosine-csls_knn_10-S2T-10000'
+#   supervised criterion: 'precision_at_1-csls_knn_10'
 
 # main
 parser = argparse.ArgumentParser(description='Supervised training')
 parser.add_argument("--seed", type=int, default=-1, help="Initialization seed")
 parser.add_argument("--verbose", type=int, default=2, help="Verbose level (2:debug, 1:info, 0:warning)")
 parser.add_argument("--exp_path", type=str, default="", help="Where to store experiment logs and models")
+parser.add_argument("--exp_name", type=str, default="debug", help="Experiment name")
+parser.add_argument("--exp_id", type=str, default="", help="Experiment ID")
 parser.add_argument("--cuda", type=bool_flag, default=True, help="Run on GPU")
-parser.add_argument("--export", type=bool_flag, default=True, help="Export embeddings after training")
+parser.add_argument("--export", type=str, default="txt", help="Export embeddings after training (txt / pth)")
+
 # data
 parser.add_argument("--src_lang", type=str, default='en', help="Source language")
 parser.add_argument("--tgt_lang", type=str, default='es', help="Target language")
 parser.add_argument("--emb_dim", type=int, default=300, help="Embedding dimension")
-parser.add_argument("--max_vocab", type=int, default=200000, help="Maximum vocabulary size")
+parser.add_argument("--max_vocab", type=int, default=200000, help="Maximum vocabulary size (-1 to disable)")
 # training refinement
-parser.add_argument("--n_iters", type=int, default=5, help="Number of iterations")
+parser.add_argument("--n_refinement", type=int, default=5, help="Number of refinement iterations (0 to disable the refinement procedure)")
 # dictionary creation parameters (for refinement)
 parser.add_argument("--dico_train", type=str, default="default", help="Path to training dictionary (default: use identical character strings)")
+parser.add_argument("--dico_eval", type=str, default="default", help="Path to evaluation dictionary")
 parser.add_argument("--dico_method", type=str, default='csls_knn_10', help="Method used for dictionary generation (nn/invsm_beta_30/csls_knn_10)")
 parser.add_argument("--dico_build", type=str, default='S2T&T2S', help="S2T,T2S,S2T|T2S,S2T&T2S")
 parser.add_argument("--dico_threshold", type=float, default=0, help="Threshold confidence for dictionary generation")
@@ -59,6 +65,8 @@ assert params.dico_max_size == 0 or params.dico_max_size < params.dico_max_rank
 assert params.dico_max_size == 0 or params.dico_max_size > params.dico_min_size
 assert os.path.isfile(params.src_emb)
 assert os.path.isfile(params.tgt_emb)
+assert params.dico_eval == 'default' or os.path.isfile(params.dico_eval)
+assert params.export in ["", "txt", "pth"]
 
 # build logger / model / trainer / evaluator
 logger = initialize_exp(params)
@@ -71,11 +79,11 @@ evaluator = Evaluator(trainer)
 trainer.load_training_dico(params.dico_train)
 
 """
-Learning loop for Procrustes Iterative Refinement
+Learning loop for Procrustes Iterative Learning
 """
-for n_iter in range(params.n_iters):
+for n_iter in range(params.n_refinement + 1):
 
-    logger.info('Starting refinement iteration %i...' % n_iter)
+    logger.info('Starting iteration %i...' % n_iter)
 
     # build a dictionary from aligned embeddings (unless
     # it is the first iteration and we use the init one)
@@ -92,10 +100,10 @@ for n_iter in range(params.n_iters):
     # JSON log / save best model / end of epoch
     logger.info("__log__:%s" % json.dumps(to_log))
     trainer.save_best(to_log, VALIDATION_METRIC)
-    logger.info('End of refinement iteration %i.\n\n' % n_iter)
+    logger.info('End of iteration %i.\n\n' % n_iter)
 
 
-# export embeddings to a text format
+# export embeddings
 if params.export:
     trainer.reload_best()
     trainer.export()

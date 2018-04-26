@@ -27,13 +27,15 @@ parser = argparse.ArgumentParser(description='Unsupervised training')
 parser.add_argument("--seed", type=int, default=-1, help="Initialization seed")
 parser.add_argument("--verbose", type=int, default=2, help="Verbose level (2:debug, 1:info, 0:warning)")
 parser.add_argument("--exp_path", type=str, default="", help="Where to store experiment logs and models")
+parser.add_argument("--exp_name", type=str, default="debug", help="Experiment name")
+parser.add_argument("--exp_id", type=str, default="", help="Experiment ID")
 parser.add_argument("--cuda", type=bool_flag, default=True, help="Run on GPU")
-parser.add_argument("--export", type=bool_flag, default=True, help="Export embeddings after training")
+parser.add_argument("--export", type=str, default="txt", help="Export embeddings after training (txt / pth)")
 # data
 parser.add_argument("--src_lang", type=str, default='en', help="Source language")
 parser.add_argument("--tgt_lang", type=str, default='es', help="Target language")
 parser.add_argument("--emb_dim", type=int, default=300, help="Embedding dimension")
-parser.add_argument("--max_vocab", type=int, default=200000, help="Maximum vocabulary size")
+parser.add_argument("--max_vocab", type=int, default=200000, help="Maximum vocabulary size (-1 to disable)")
 # mapping
 parser.add_argument("--map_id_init", type=bool_flag, default=True, help="Initialize the mapping as an identity matrix")
 parser.add_argument("--map_beta", type=float, default=0.001, help="Beta for orthogonalization")
@@ -58,9 +60,9 @@ parser.add_argument("--lr_decay", type=float, default=0.98, help="Learning rate 
 parser.add_argument("--min_lr", type=float, default=1e-6, help="Minimum learning rate (SGD only)")
 parser.add_argument("--lr_shrink", type=float, default=0.5, help="Shrink the learning rate if the validation metric decreases (1 to disable)")
 # training refinement
-parser.add_argument("--refinement", type=bool_flag, default=False, help="Use iterative Procrustes refinement")
-parser.add_argument("--n_iters", type=int, default=5, help="Number of iterations")
+parser.add_argument("--n_refinement", type=int, default=5, help="Number of refinement iterations (0 to disable the refinement procedure)")
 # dictionary creation parameters (for refinement)
+parser.add_argument("--dico_eval", type=str, default="default", help="Path to evaluation dictionary")
 parser.add_argument("--dico_method", type=str, default='csls_knn_10', help="Method used for dictionary generation (nn/invsm_beta_30/csls_knn_10)")
 parser.add_argument("--dico_build", type=str, default='S2T&T2S', help="S2T,T2S,S2T|T2S,S2T&T2S")
 parser.add_argument("--dico_threshold", type=float, default=0, help="Threshold confidence for dictionary generation")
@@ -85,6 +87,8 @@ assert params.dis_lambda > 0 and params.dis_steps > 0
 assert 0 < params.lr_shrink <= 1
 assert os.path.isfile(params.src_emb)
 assert os.path.isfile(params.tgt_emb)
+assert params.dico_eval == 'default' or os.path.isfile(params.dico_eval)
+assert params.export in ["", "txt", "pth"]
 
 # build model / trainer / evaluator
 logger = initialize_exp(params)
@@ -150,13 +154,13 @@ if params.adversarial:
 """
 Learning loop for Procrustes Iterative Refinement
 """
-if params.refinement:
+if params.n_refinement > 0:
     # Get the best mapping according to VALIDATION_METRIC
     logger.info('----> ITERATIVE PROCRUSTES REFINEMENT <----\n\n')
     trainer.reload_best()
 
     # training loop
-    for n_iter in range(params.n_iters):
+    for n_iter in range(params.n_refinement):
 
         logger.info('Starting refinement iteration %i...' % n_iter)
 
@@ -176,7 +180,7 @@ if params.refinement:
         logger.info('End of refinement iteration %i.\n\n' % n_iter)
 
 
-# export embeddings to a text format
+# export embeddings
 if params.export:
     trainer.reload_best()
     trainer.export()
